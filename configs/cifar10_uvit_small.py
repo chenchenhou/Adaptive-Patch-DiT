@@ -13,12 +13,12 @@ def get_config():
     config.pred = 'noise_pred'
 
     config.train = d(
-        n_steps=500000,
+        n_steps=50000,      # 500000 -> 50000
         batch_size=128,
         mode='uncond',
         log_interval=10,
-        eval_interval=5000,
-        save_interval=50000,
+        eval_interval=1000, # 10000 -> 1000
+        save_interval=5000, # 50000 -> 5000
     )
 
     config.optimizer = d(
