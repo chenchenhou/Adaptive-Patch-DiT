@@ -30,6 +30,9 @@ def get_nnet(name, **kwargs):
     elif name == 'uvit_t2i':
         from libs.uvit_t2i import UViT
         return UViT(**kwargs)
+    elif name == 'uvit_apt':
+        from libs.uvit_apt import UViT_APT
+        return UViT_APT(**kwargs)
     else:
         raise NotImplementedError(name)
 
