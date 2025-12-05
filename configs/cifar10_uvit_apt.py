@@ -44,7 +44,7 @@ def get_config():
         num_classes=-1,
         # --- APT Specific Params ---
         num_scales=2,
-        apt_thresholds=[0.5], # Adjust this to control speed vs quality
+        apt_thresholds=[1.5], # Adjust this to control speed vs quality
     )
 
     config.dataset = d(
