@@ -131,8 +131,8 @@ class UViT_APT(nn.Module):
             decoder = self.decoder_heads[i]
             pixels = decoder(valid_tokens) # (Total_Tokens, C * s * s)
             
-            # 4. Reshape to blocks: (Total_Tokens, C, s, s)
-            pixels = pixels.view(-1, self.in_chans, scale, scale)
+            # 4. Reshape to blocks
+            pixels = pixels.view(-1, self.in_chans, scale, scale) # (Total_Tokens, C, s, s)
             
             # 5. Vectorized Paste
             # Reshape canvas to expose the grid: (B, C, H//s, s, W//s, s)
@@ -144,14 +144,11 @@ class UViT_APT(nn.Module):
             # Permute to put spatial grid dimensions together: (B, H_grid, W_grid, C, s, s)
             canvas_perm = canvas_view.permute(0, 2, 4, 1, 3, 5)
             
-            # Flatten spatial grid to match mask: (B, Grid_Size, ...)
-            # spatial_mask is (B, Grid_Size)
+            # Flatten spatial grid to match mask: (B, Grid_Size, ...), spatial_mask is (B, Grid_Size)
             flat_mask = spatial_mask.reshape(B, -1)
             
-            # Assign all pixels at once!
-            # canvas_perm[flat_mask] selects the active blocks across the batch
-            # and assigns 'pixels' to them in order.
-            canvas_perm[flat_mask] = pixels.to(canvas.dtype)
+            # Assign all pixels at once
+            canvas_perm[spatial_mask.bool()] = pixels.to(canvas.dtype)
             
         return canvas
 
@@ -178,11 +175,13 @@ class UViT_APT(nn.Module):
             extras_mask = torch.ones((x.shape[0], self.extras), dtype=torch.bool, device=x.device)
             attn_mask = torch.cat([extras_mask, attn_mask], dim=1)
 
+        skips = []
         for blk in self.in_blocks:
             x = blk(x)
+            skips.append(x)
         x = self.mid_block(x)
         for blk in self.out_blocks:
-            x = blk(x, skips.pop()) if 'skips' in locals() else blk(x)
+            x = blk(x, skips.pop())
 
         x = self.norm(x)
         x = x[:, self.extras:, :]
