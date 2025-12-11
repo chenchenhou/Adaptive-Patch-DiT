@@ -37,6 +37,16 @@ We benchmarked our model against a standard U-ViT baseline. Despite processing f
 
 *Our APT model achieved a **~2x improvement in FID** compared to the baseline at the same training step, validating that focusing compute on high-entropy regions serves as a strong architectural prior for image generation.*
 
+## CelebA ($64 \times 64$)
+We further evaluated the model on facial generation to test performance at higher resolutions.
+
+| Model | Token Strategy | **FID Score** (Lower is better) |
+| :--- | :--- | :--- |
+| **Baseline U-ViT** | Fixed Grid (100% Tokens) | **44.1** |
+| **APT-DiT (Ours)** | Adaptive (Variable Tokens) | 198.2 |
+
+*Analysis: While the model converged successfully on color and global structure, the CelebA experiments revealed a specific limitation we term the **"Smoothness Trap."** The entropy tokenizer often misclassified smooth features (like skin and cheeks) as low-information background, merging them into large patches. This caused texture artifacts in facial regions, increasing the FID score despite the efficiency gains.*
+
 ## Installation
 
 ```bash
