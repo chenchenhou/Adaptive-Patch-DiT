@@ -4,6 +4,7 @@ from .timm import trunc_normal_
 from .uvit import Block, timestep_embedding
 from .apt_utils import PatchTokenizer, TokenizedZeroConvPatchAttn
 
+
 class UViT_APT(nn.Module):
     def __init__(self, img_size=224, patch_size=16, in_chans=3, embed_dim=768, depth=12, num_heads=12, mlp_ratio=4.,
                  qkv_bias=False, qk_scale=None, norm_layer=nn.LayerNorm, mlp_time_embed=False, num_classes=-1,
@@ -73,6 +74,7 @@ class UViT_APT(nn.Module):
         trunc_normal_(self.pos_embed, std=.02)
         self.apply(self._init_weights)
 
+
     def _init_weights(self, m):
         if isinstance(m, nn.Linear):
             trunc_normal_(m.weight, std=.02)
@@ -82,75 +84,68 @@ class UViT_APT(nn.Module):
             nn.init.constant_(m.bias, 0)
             nn.init.constant_(m.weight, 1.0)
 
+
     @torch.jit.ignore
     def no_weight_decay(self):
         return {'pos_embed'}
 
+
     def reconstruct_image(self, x_tokens, masks):
         """
-        Vectorized reconstruction of the image from tokens.
-        Eliminates per-patch loops to restore training speed.
+        Reconstructs the image from tokens using vectorized operations.
+
+        Args:
+            x_tokens: Input tokens with shape (B, L, D).
+            masks: Dictionary mapping scales to boolean masks (B, H_grid, W_grid).
+
+        Returns:
+            Reconstructed image tensor (B, C, H, W).
         """
         B, L, D = x_tokens.shape
-        # Canvas: (B, C, H, W)
-        canvas = torch.zeros((B, self.in_chans, self.img_size, self.img_size), 
-                             dtype=x_tokens.dtype, device=x_tokens.device)
-        
-        # Track position in the sequence per image (all start at 0)
+        canvas = torch.zeros((B, self.in_chans, self.img_size, self.img_size),
+                            dtype=x_tokens.dtype, device=x_tokens.device)
+
+        # Track token consumption per image
         current_offset = torch.zeros(B, dtype=torch.long, device=x_tokens.device)
         
-        # Helper range for vectorized masking
+        # Helper for vectorized slicing
         max_len = x_tokens.shape[1]
-        range_tensor = torch.arange(max_len, device=x_tokens.device).unsqueeze(0) # (1, L)
+        range_tensor = torch.arange(max_len, device=x_tokens.device).unsqueeze(0)  # (1, L)
 
-        sorted_scales = sorted(masks.keys())
-        
-        for i, scale in enumerate(sorted_scales):
-            spatial_mask = masks[scale] # (B, H_grid, W_grid)
+        for i, scale in enumerate(sorted(masks.keys())):
+            spatial_mask = masks[scale]
             
-            # 1. Count tokens per image for this scale
-            counts = spatial_mask.reshape(B, -1).sum(dim=1).long() # (B,)
-            
-            # 2. Vectorized Select: Grab the next 'counts' tokens for each image
-            # We want tokens where: offset <= index < offset + counts
+            # Calculate number of tokens for this scale per image
+            counts = spatial_mask.reshape(B, -1).sum(dim=1).long()  # (B,)
+
+            # Identify valid token indices for this scale
             start = current_offset.unsqueeze(1)
             end = (current_offset + counts).unsqueeze(1)
-            scale_token_mask = (range_tensor >= start) & (range_tensor < end) # (B, L)
-            
-            # Update offsets for next iteration
+            scale_token_mask = (range_tensor >= start) & (range_tensor < end)  # (B, L)
+
             current_offset += counts
-            
-            # Gather all valid tokens for this scale across the entire batch
-            # Shape: (Total_Active_Tokens_In_Batch, D)
+
+            # Extract tokens: (Total_Active_Tokens, D)
             valid_tokens = x_tokens[scale_token_mask]
-            
+
             if valid_tokens.shape[0] == 0:
                 continue
-                
-            # 3. Project to pixels
+
+            # Decode and reshape to patches
             decoder = self.decoder_heads[i]
-            pixels = decoder(valid_tokens) # (Total_Tokens, C * s * s)
-            
-            # 4. Reshape to blocks
-            pixels = pixels.view(-1, self.in_chans, scale, scale) # (Total_Tokens, C, s, s)
-            
-            # 5. Vectorized Paste
-            # Reshape canvas to expose the grid: (B, C, H//s, s, W//s, s)
+            pixels = decoder(valid_tokens)  # (Total_Tokens, C * s * s)
+            pixels = pixels.view(-1, self.in_chans, scale, scale)  # (Total_Tokens, C, s, s)
+
+            # Reshape canvas to expose grid: (B, C, H, W) -> (B, Grid_H, Grid_W, C, s, s)
             H_grid, W_grid = self.img_size // scale, self.img_size // scale
-            
-            # View as blocks: (B, C, H_grid, s, W_grid, s)
             canvas_view = canvas.view(B, self.in_chans, H_grid, scale, W_grid, scale)
-            
-            # Permute to put spatial grid dimensions together: (B, H_grid, W_grid, C, s, s)
             canvas_perm = canvas_view.permute(0, 2, 4, 1, 3, 5)
-            
-            # Flatten spatial grid to match mask: (B, Grid_Size, ...), spatial_mask is (B, Grid_Size)
-            flat_mask = spatial_mask.reshape(B, -1)
-            
-            # Assign all pixels at once
+
+            # Inject pixels into masked positions
             canvas_perm[spatial_mask.bool()] = pixels.to(canvas.dtype)
-            
+
         return canvas
+
 
     def forward(self, x, timesteps, y=None):
         tokenizer_out = self.tokenizer(x) 
